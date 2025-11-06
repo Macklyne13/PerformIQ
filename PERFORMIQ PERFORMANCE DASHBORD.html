@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Calls Performance Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <style>
+        /* --- CSS Styling --- */
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; background-color: #f4f7f6; color: #333; }
+        .container { max-width: 1400px; margin: auto; }
+        /* Input Section Styling */
+        .data-input { margin-bottom: 20px; padding: 15px; border: 1px solid #cceeff; background-color: #e6f7ff; border-radius: 10px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05); display: flex; align-items: center; }
+        .data-input button { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; margin-left: 15px; transition: background-color 0.3s; }
+        .data-input button:hover { background-color: #0056b3; }
+        /* Data/Section Styling */
+        .data-section { margin-top: 30px; padding: 20px; border: 1px solid #ddd; background-color: #fff; border-radius: 10px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); }
+        h2 { color: #007bff; border-bottom: 3px solid #007bff; padding-bottom: 10px; margin-bottom: 20px; }
+        h3 { color: #555; border-bottom: 2px solid #eee; padding-bottom: 5px; margin-top: 15px; }
+        h4 { color: #333; margin-top: 15px; }
+        #fullTableContainer { max-height: 500px; overflow-y: auto; margin-bottom: 20px; }
+        /* Table Styling */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+        th, td { border: 1px solid #e0e0e0; padding: 10px 8px; text-align: left; }
+        th { background-color: #f0f8ff; font-weight: bold; }
+        /* Summary Group Layout */
+        .summary-dashboard { display: flex; flex-wrap: wrap; justify-content: space-between; }
+        .summary-group { width: 31%; min-width: 300px; margin: 10px 0; padding: 15px; border: 1px solid #e0f7fa; border-radius: 8px; background-color: #f9f9f9; }
+        /* Chart Layout: Charts stack one after another (width: 100%) */
+        .chart-row { display: block; margin-top: 20px; }
+        .chart-container { width: 100%; min-height: 400px; padding: 15px; background-color: #fff; border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 20px; }
+        
+        @media (max-width: 1000px) {
+            .summary-group { width: 48%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>📊 Dynamic Calls Performance Dashboard</h2>
+        
+        <div class="data-input">
+            <input type="file" id="csvFile" accept=".csv">
+            <button onclick="processFile()">Upload & Analyze Data</button>
+            <span id="status" style="margin-left: 15px; font-weight: bold;"></span>
+        </div>
+
+        <div id="fullTableContainer" class="data-section">
+            <h3>1. Complete Data Set (Raw Upload)</h3>
+            <p id="fullTablePlaceholder">Upload a CSV file (Headers expected: **Calls, ACMs, Team, Branch**) to begin analysis.</p>
+            <table id="fullTable"></table>
+        </div>
+
+        <hr>
+
+        <div class="data-section">
+            <h3>2. Top/Least 3 Performance Tables</h3>
+            <div class="summary-dashboard">
+                <div class="summary-group"><h4 title="Highest Individual Call Count">🥇 Top 3 ACMs</h4><table id="topAcmsTable"></table></div>
+                <div class="summary-group"><h4 title="Lowest Individual Call Count">🥈 Least 3 ACMs</h4><table id="leastAcmsTable"></table></div>
+                <div class="summary-group"><h4 title="Highest Total Call Count">🏆 Top 3 Teams</h4><table id="topTeamsTable"></table></div>
+                <div class="summary-group"><h4 title="Lowest Total Call Count">📉 Least 3 Teams</h4><table id="leastTeamsTable"></table></div>
+                <div class="summary-group"><h4 title="Highest Total Call Count">🌟 Top 3 Branches</h4><table id="topBranchesTable"></table></div>
+                <div class="summary-group"><h4 title="Lowest Total Call Count">🔻 Least 3 Branches</h4><table id="leastBranchesTable"></table></div>
+            </div>
+        </div>
+
+        <hr>
+
+        <div class="data-section">
+            <h3>3. Performance Comparison Charts (Top 3 vs. Least 3)</h3>
+            <div class="chart-row">
+                <div class="chart-container">
+                    <h4>ACMs Individual Call Comparison</h4>
+                    <canvas id="acmChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h4>Team Performance Comparison</h4>
+                    <canvas id="teamChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h4>Branch Performance Comparison</h4>
+                    <canvas id="branchChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Register the Data Labels Plugin for Chart.js
+        Chart.register(ChartDataLabels);
+        
+        const existingCharts = {};
+        const KPI_KEY = 'Calls'; // Key for the numeric value
+        const ACM_NAME_KEY = 'ACMs'; // Key for the individual name
+
+        // --- Helper: CSV Parsing ---
+        function parseCSV(csvText) {
+            const lines = csvText.trim().split('\n');
+            if (lines.length < 2) return [];
+
+            // Normalize headers (removes spaces, replaces non-alpha with underscore)
+            const headers = lines[0].split(',').map(h => h.trim().replace(/[^a-zA-Z0-9]/g, '_'));
+            const data = [];
+
+            for (let i = 1; i < lines.length; i++) {
+                const values = lines[i].split(',');
+                if (values.length === headers.length) {
+                    let row = {};
+                    for (let j = 0; j < headers.length; j++) {
+                        let header = headers[j];
+                        let value = values[j].trim();
+                        // Check if the header matches the KPI key (Calls)
+                        row[header] = (header === KPI_KEY) ? parseFloat(value) || 0 : value;
+                    }
+                    data.push(row);
+                }
+            }
+            return data;
+        }
+
+        // --- Helper: Table Rendering ---
+        function displayTable(data, tableId, headers = null) {
+            const container = document.getElementById(tableId);
+            container.innerHTML = '';
+            if (data.length === 0) {
+                container.innerHTML = 'No data to display.';
+                return;
+            }
+
+            const table = document.createElement('table');
+            const dataHeaders = headers || Object.keys(data[0]);
+
+            const thead = table.createTHead();
+            let headerRow = thead.insertRow();
+            dataHeaders.forEach(header => {
+                let th = document.createElement("th");
+                // Custom handling for ACM Name and Calls headers
+                if (header === KPI_KEY) {
+                    th.textContent = 'Calls';
+                } else if (header === ACM_NAME_KEY) {
+                    th.textContent = 'ACM Name';
+                } else if (header === 'Total_Calls') {
+                    th.textContent = 'Total Calls';
+                } else {
+                    th.textContent = header.replace(/_/g, ' '); // Display friendly header
+                }
+                headerRow.appendChild(th);
+            });
+
+            const tbody = table.createTBody();
+            data.forEach(rowData => {
+                let row = tbody.insertRow();
+                dataHeaders.forEach(header => {
+                    let cell = row.insertCell();
+                    // Display numbers rounded to 0 decimal places (for call counts)
+                    cell.textContent = (typeof rowData[header] === 'number') ? Math.round(rowData[header]) : rowData[header];
+                });
+            });
+
+            container.appendChild(table);
+        }
+
+        // --- Helper: Dynamic Aggregation and Sorting ---
+        function aggregateAndFilter(data, groupKey) {
+            const totals = data.reduce((acc, row) => {
+                const key = row[groupKey];
+                acc[key] = (acc[key] || 0) + row[KPI_KEY]; 
+                return acc;
+            }, {});
+
+            // Convert to array of objects for dynamic sorting
+            return Object.entries(totals)
+                .map(([name, total]) => ({ [groupKey]: name, Total_Calls: total }))
+                .sort((a, b) => b.Total_Calls - a.Total_Calls); // Sort Descending (Top will be first)
+        }
+
+        // --- Chart Rendering Function with Data Labels and Names ---
+        function renderChart(chartId, title, aggregatedData, categoryKey, valueKey = 'Total_Calls') {
+            if (existingCharts[chartId]) {
+                existingCharts[chartId].destroy();
+            }
+            
+            const topCount = 3;
+            // Get dynamically identified Top 3 and Least 3
+            const topData = aggregatedData.slice(0, topCount);
+            const leastData = aggregatedData.slice(-topCount); 
+
+            // Combine data for the chart: Least first, then Top
+            const labels = [...leastData.map(d => d[categoryKey]), ...topData.map(d => d[categoryKey])];
+            const values = [...leastData.map(d => d[valueKey]), ...topData.map(d => d[valueKey])];
+            
+            // Define colors: Red/Orange for Least, Blue/Green for Top
+            const backgroundColors = [
+                'rgba(255, 99, 132, 0.7)', 'rgba(255, 159, 64, 0.7)', 'rgba(255, 205, 86, 0.7)', 
+                'rgba(75, 192, 192, 0.7)', 'rgba(54, 162, 235, 0.7)', 'rgba(153, 102, 255, 0.7)'  
+            ];
+            
+            const ctx = document.getElementById(chartId).getContext('2d');
+            existingCharts[chartId] = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Call Count',
+                        data: values,
+                        backgroundColor: backgroundColors,
+                        borderColor: backgroundColors.map(c => c.replace('0.7', '1')), 
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y', // Horizontal bars to show names clearly
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            title: { display: true, text: 'Call Count' } // Header for call values
+                        }
+                    },
+                    plugins: {
+                        title: { display: true, text: title },
+                        legend: { display: false },
+                        datalabels: {
+                            anchor: 'end',
+                            align: 'right',
+                            formatter: (value) => Math.round(value), // Show the exact call count value
+                            color: '#333'
+                        }
+                    }
+                }
+            });
+        }
+
+        // --- Main Analysis Function ---
+        function generateSummaries(data) {
+            // 1. ACMS (Individual Entries) - Sorted dynamically by Calls
+            const sortedByCalls = [...data].sort((a, b) => b[KPI_KEY] - a[KPI_KEY]);
+            // Define headers to ensure ACM Name and Calls columns are explicitly present
+            const acmHeaders = [ACM_NAME_KEY, KPI_KEY, 'Team', 'Branch'];
+
+            // Top 3 ACMs
+            const top3Acms = sortedByCalls.slice(0, 3);
+            displayTable(top3Acms, 'topAcmsTable', acmHeaders);
+            // Least 3 ACMs (reversed for ascending order display)
+            const least3Acms = sortedByCalls.slice(-3).reverse();
+            displayTable(least3Acms, 'leastAcmsTable', acmHeaders);
+
+            // Render ACM Chart (uses individual call values and names)
+            const acmChartData = [...top3Acms].reverse().concat(least3Acms); // Combine top and least
+            renderChart('acmChart', 'ACMs Individual Call Comparison', acmChartData, ACM_NAME_KEY, KPI_KEY);
+
+
+            // 2. TEAMS (Aggregated Totals) - Grouped and Sorted dynamically by Total Calls
+            const aggregatedTeams = aggregateAndFilter(data, 'Team');
+            
+            displayTable(aggregatedTeams.slice(0, 3), 'topTeamsTable', ['Team', 'Total_Calls']);
+            displayTable(aggregatedTeams.slice(-3).reverse(), 'leastTeamsTable', ['Team', 'Total_Calls']);
+            
+            // Render Team Chart
+            renderChart('teamChart', 'Team Performance Comparison', aggregatedTeams, 'Team');
+
+
+            // 3. BRANCHES (Aggregated Totals) - Grouped and Sorted dynamically by Total Calls
+            const aggregatedBranches = aggregateAndFilter(data, 'Branch');
+            
+            displayTable(aggregatedBranches.slice(0, 3), 'topBranchesTable', ['Branch', 'Total_Calls']);
+            displayTable(aggregatedBranches.slice(-3).reverse(), 'leastBranchesTable', ['Branch', 'Total_Calls']);
+
+            // Render Branch Chart
+            renderChart('branchChart', 'Branch Performance Comparison', aggregatedBranches, 'Branch');
+        }
+
+        // --- Event Handler: Triggered by file selection ---
+        function processFile() {
+            const fileInput = document.getElementById('csvFile');
+            const status = document.getElementById('status');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                status.textContent = "Please select a CSV file first.";
+                return;
+            }
+
+            status.textContent = "Processing file...";
+            document.getElementById('fullTablePlaceholder').style.display = 'none';
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const csvText = e.target.result;
+                    const data = parseCSV(csvText);
+                    
+                    if (data.length === 0 || !data[0].hasOwnProperty(KPI_KEY)) {
+                        status.textContent = `Error: File is empty or missing the required header: ${KPI_KEY}. Please check your CSV column names.`;
+                        return;
+                    }
+
+                    // 1. Display the entire data set immediately
+                    displayTable(data, 'fullTable'); 
+                    
+                    // 2. Generate and display dynamic summaries and charts
+                    generateSummaries(data);
+                    
+                    status.textContent = `✅ Success! Processed ${data.length} records.`;
+                } catch (error) {
+                    status.textContent = `❌ An error occurred: ${error.message}`;
+                    console.error(error);
+                }
+            };
+            
+            reader.onerror = () => {
+                status.textContent = "Error reading file.";
+            };
+
+            reader.readAsText(file);
+        }
+    </script>
+</body>
+</htm
