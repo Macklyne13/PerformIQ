@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Calls Performance Dashboard</title>
+    <!-- Tailwind CSS CDN for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Font: Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': '#4f46e5', // Indigo-600
+                        'accent': '#14b8a6', // Teal-500
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <!-- Charting Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <style>
+        /* Base Styles and Layout */
+        body { 
+            background-color: #eef2ff; /* Light Indigo background */
+            min-height: 100vh;
+        }
+        .container {
+            padding: 2rem 1rem;
+        }
+        
+        /* Table and Scroll */
+        #fullTableContainer { 
+            max-height: 500px; 
+            overflow-y: auto; 
+            margin-bottom: 20px; 
+            border: 1px solid #e0e7ff; /* Light border */
+        }
+        /* Custom table styling to ensure readability */
+        #fullTable th, #fullTable td, .summary-group th, .summary-group td {
+            padding: 10px 8px; 
+            border: none; /* Remove inner cell borders */
+        }
+        /* Style for the horizontal rule separator */
+        hr { 
+            border-top: 4px solid #c7d2fe; /* Stronger, lighter indigo line */
+            margin: 40px 0;
+            border-radius: 2px;
+        }
+
+        /* --- Tab Navigation Styles (Enhanced) --- */
+        .tab-button {
+            padding: 10px 20px;
+            font-weight: 600;
+            border-radius: 12px 12px 0 0;
+            transition: all 0.2s ease-in-out;
+            cursor: pointer;
+            color: #6366f1; /* text-indigo-500 */
+            border-bottom: 4px solid transparent;
+            margin-bottom: -4px; 
+            white-space: nowrap;
+            background-color: #e0e7ff; /* bg-indigo-100 */
+        }
+        .tab-button:hover {
+            color: #4f46e5; /* primary color */
+        }
+        .active-tab {
+            color: #ffffff; 
+            border-bottom-color: #14b8a6; /* accent color */
+            background-color: #4f46e5; /* primary color */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body class="font-sans text-gray-800">
+    <div class="container mx-auto max-w-7xl">
+        <h2 class="text-4xl font-extrabold text-indigo-700 pb-4 mb-10 border-b-4 border-indigo-400">
+            📊 Dynamic Calls Performance Dashboard
+        </h2>
+        
+        <!-- Data Input Section - Styled as a prominent card -->
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center mb-10 p-6 border-2 border-indigo-300 bg-white rounded-2xl shadow-xl gap-4">
+            <input type="file" id="csvFile" accept=".csv" class="flex-grow p-3 text-gray-700 rounded-lg border-2 border-indigo-200 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150">
+            <button onclick="processFile()" class="px-8 py-3 bg-primary text-white font-bold rounded-lg shadow-lg hover:bg-indigo-700 transition duration-150 ease-in-out whitespace-nowrap transform hover:scale-[1.02]">
+                Upload & Analyze Data
+            </button>
+            <span id="status" class="ml-0 sm:ml-6 font-extrabold text-lg text-primary"></span>
+        </div>
+
+        <!-- Raw Data Table Section - Enhanced Card -->
+        <div id="fullTableContainer" class="data-section mt-10 p-6 bg-white rounded-2xl shadow-xl">
+            <h3 class="text-2xl font-bold text-gray-700 border-b-2 border-indigo-100 pb-3 mb-6">1. Complete Data Set (Raw Upload)</h3>
+            <p id="fullTablePlaceholder" class="text-gray-500 italic p-4 bg-indigo-50 rounded-lg">Upload a CSV file (Headers expected: <strong class="text-primary">Calls, ACMs/Account Manager, Team, Branch</strong>) to begin analysis.</p>
+            <table id="fullTable" class="w-full text-sm"></table>
+        </div>
+
+        <hr>
+
+        <!-- Summary Tables & Charts Section (Tabbed View) - Main Analysis Card -->
+        <div class="data-section p-8 bg-white rounded-2xl shadow-xl">
+            <h3 class="text-2xl font-bold text-gray-700 border-b-2 border-indigo-100 pb-3 mb-6">2. Performance Deep Dive (Top 3 vs. Least 3)</h3>
+
+            <!-- Navigation Tabs -->
+            <div class="flex space-x-1 sm:space-x-2 mb-6 border-b-4 border-gray-200">
+                <button id="tab-acm" onclick="showView('acm', true)" class="tab-button">Account Managers (ACMs)</button>
+                <button id="tab-team" onclick="showView('team', true)" class="tab-button">Teams</button>
+                <button id="tab-branch" onclick="showView('branch', true)" class="tab-button">Branches</button>
+            </div>
+            
+            <!-- ACM View Container -->
+            <div id="acmView" class="view-content hidden">
+                <h4 class="text-xl font-semibold text-primary mb-6 border-b pb-2">Individual ACM Performance Breakdown</h4>
+                
+                <!-- Summary Tables -->
+                <div class="summary-dashboard grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+                    <div class="summary-group p-5 border-t-4 border-accent bg-teal-50 rounded-xl shadow-lg transition hover:shadow-xl">
+                        <h4 class="text-lg font-bold text-accent mb-3 flex items-center">🥇 Top 3 ACMs</h4>
+                        <table id="topAcmsTable" class="w-full text-sm"></table>
+                    </div>
+                    <div class="summary-group p-5 border-t-4 border-red-500 bg-red-50 rounded-xl shadow-lg transition hover:shadow-xl">
+                        <h4 class="text-lg font-bold text-red-600 mb-3 flex items-center">🔻 Least 3 ACMs</h4>
+                        <table id="leastAcmsTable" class="w-full text-sm"></table>
+                    </div>
+                </div>
+
+                <!-- Charts (Only one visible at a time) -->
+                <div class="mt-10">
+                    <!-- Top Chart Container -->
+                    <div id="acmTopChartContainer" class="chart-container h-[400px] p-4 bg-gray-50 rounded-xl shadow-xl"> 
+                        <h4 id="acmTopChartTitle" class="text-xl font-semibold text-accent mb-4 text-center">🏆 Top 3 ACMs by Calls</h4>
+                        <canvas id="acmTopChart"></canvas>
+                    </div>
+                    <!-- Least Chart Container -->
+                    <div id="acmLeastChartContainer" class="chart-container h-[400px] p-4 bg-gray-50 rounded-xl shadow-xl hidden">
+                        <h4 id="acmLeastChartTitle" class="text-xl font-semibold text-red-600 mb-4 text-center">🔻 Least 3 ACMs by Calls</h4>
+                        <canvas id="acmLeastChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Team View Container -->
+            <div id="teamView" class="view-content hidden">
+                <h4 class="text-xl font-semibold text-primary mb-6 border-b pb-2">Team Aggregate Performance Breakdown</h4>
+                <div class="summary-dashboard grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+                    <div class="summary-group p-5 border-t-4 border-accent bg-teal-50 rounded-xl shadow-lg transition hover:shadow-xl">
+                        <h4 class="text-lg font-bold text-accent mb-3 flex items-center">🏆 Top 3 Teams</h4>
+                        <table id="topTeamsTable" class="w-full text-sm"></table>
+                    </div>
+                    <div class="summary-group p-5 border-t-4 border-red-500 bg-red-50 rounded-xl shadow-lg transition hover:shadow-xl">
+                        <h4 class="text-lg font-bold text-red-600 mb-3 flex items-center">📉 Least 3 Teams</h4>
+                        <table id="leastTeamsTable" class="w-full text-sm"></table>
+                    </div>
+                </div>
+                <!-- Charts (Only one visible at a time) -->
+                <div class="mt-10">
+                    <!-- Top Chart Container -->
+                    <div id="teamTopChartContainer" class="chart-container h-[400px] p-4 bg-gray-50 rounded-xl shadow-xl"> 
+                        <h4 id="teamTopChartTitle" class="text-xl font-semibold text-accent mb-4 text-center">🏆 Top 3 Teams by Calls</h4>
+                        <canvas id="teamTopChart"></canvas>
+                    </div>
+                    <!-- Least Chart Container -->
+                    <div id="teamLeastChartContainer" class="chart-container h-[400px] p-4 bg-gray-50 rounded-xl shadow-xl hidden">
+                        <h4 id="teamLeastChartTitle" class="text-xl font-semibold text-red-600 mb-4 text-center">📉 Least 3 Teams by Calls</h4>
+                        <canvas id="teamLeastChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Branch View Container -->
+            <div id="branchView" class="view-content hidden">
+                <h4 class="text-xl font-semibold text-primary mb-6 border-b pb-2">Branch Aggregate Performance Breakdown</h4>
+                <div class="summary-dashboard grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+                    <div class="summary-group p-5 border-t-4 border-accent bg-teal-50 rounded-xl shadow-lg transition hover:shadow-xl">
+                        <h4 class="text-lg font-bold text-accent mb-3 flex items-center">🌟 Top 3 Branches</h4>
+                        <table id="topBranchesTable" class="w-full text-sm"></table>
+                    </div>
+                    <div class="summary-group p-5 border-t-4 border-red-500 bg-red-50 rounded-xl shadow-lg transition hover:shadow-xl">
+                        <h4 class="text-lg font-bold text-red-600 mb-3 flex items-center">🔻 Least 3 Branches</h4>
+                        <table id="leastBranchesTable" class="w-full text-sm"></table>
+                    </div>
+                </div>
+                <!-- Charts (Only one visible at a time) -->
+                <div class="mt-10">
+                    <!-- Top Chart Container -->
+                    <div id="branchTopChartContainer" class="chart-container h-[400px] p-4 bg-gray-50 rounded-xl shadow-xl"> 
+                        <h4 id="branchTopChartTitle" class="text-xl font-semibold text-accent mb-4 text-center">🌟 Top 3 Branches by Calls</h4>
+                        <canvas id="branchTopChart"></canvas>
+                    </div>
+                    <!-- Least Chart Container -->
+                    <div id="branchLeastChartContainer" class="chart-container h-[400px] p-4 bg-gray-50 rounded-xl shadow-xl hidden">
+                        <h4 id="branchLeastChartTitle" class="text-xl font-semibold text-red-600 mb-4 text-center">🔻 Least 3 Branches by Calls</h4>
+                        <canvas id="branchLeastChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // Register the Data Labels Plugin for Chart.js
+        Chart.register(ChartDataLabels);
+        
+        const existingCharts = {};
+        const KPI_KEY = 'Calls'; 
+        let ACM_DATA_KEY = 'ACMs'; 
+        
+        // --- Auto-Cycling Variables ---
+        let autoCycleTimer = null; // Main cycle: ACM -> Team -> Branch
+        let innerChartCycleTimer = null; // Inner cycle: Top -> Least
+        const viewOrder = ['acm', 'team', 'branch'];
+        const innerViewOrder = ['Top', 'Least'];
+        let currentViewIndex = 0;
+        let currentInnerViewIndex = 0;
+        const CYCLE_INTERVAL_MS = 5000; // 5 seconds per view/chart
+
+        // --- Helper: Stops both main and inner timers ---
+        function stopCycling(isManual) {
+            if (autoCycleTimer) {
+                clearInterval(autoCycleTimer);
+                autoCycleTimer = null;
+            }
+            if (innerChartCycleTimer) {
+                clearInterval(innerChartCycleTimer);
+                innerChartCycleTimer = null;
+            }
+
+            if (isManual) {
+                const status = document.getElementById('status');
+                if (status.textContent.includes('Auto-cycling')) {
+                    status.textContent = status.textContent.replace(/\. Auto-cycling.*$/, '. Manual selection active.');
+                }
+                console.log("Auto-cycling stopped due to manual selection.");
+            }
+        }
+
+        // --- Inner Cycle Logic: Swaps Top/Least chart visibility ---
+        function cycleInnerCharts(viewId, isManual = false) {
+            if (!isManual) {
+                currentInnerViewIndex = (currentInnerViewIndex + 1) % innerViewOrder.length;
+            }
+
+            const activeChartType = innerViewOrder[currentInnerViewIndex];
+            const inactiveChartType = innerViewOrder[1 - currentInnerViewIndex];
+
+            const activeContainerId = `${viewId}${activeChartType}ChartContainer`;
+            const inactiveContainerId = `${viewId}${inactiveChartType}ChartContainer`;
+            const activeChartId = `${viewId}${activeChartType}Chart`;
+
+            // 1. Manage visibility
+            document.getElementById(activeContainerId).classList.remove('hidden');
+            document.getElementById(inactiveContainerId).classList.add('hidden');
+
+            // 2. Force Chart.js to re-render/resize the visible chart
+            if (existingCharts[activeChartId]) {
+                // Ensure chart resizes after container is fully visible
+                setTimeout(() => {
+                    existingCharts[activeChartId].resize();
+                }, 50); 
+            }
+        }
+
+
+        // --- Tab Navigation Function (Outer Cycle) ---
+        function showView(viewId, isManual = false) {
+            // Stop timers if manually clicked
+            if (isManual) {
+                stopCycling(true);
+            }
+
+            const views = ['acm', 'team', 'branch'];
+            
+            views.forEach(id => {
+                const viewElement = document.getElementById(`${id}View`);
+                const tabButton = document.getElementById(`tab-${id}`);
+
+                if (viewElement && tabButton) {
+                    if (id === viewId) {
+                        viewElement.classList.remove('hidden');
+                        tabButton.classList.add('active-tab');
+                    } else {
+                        viewElement.classList.add('hidden');
+                        tabButton.classList.remove('active-tab');
+                    }
+                }
+            });
+
+            // Start/Reset Inner Cycle if not manually stopped
+            if (!isManual) {
+                currentInnerViewIndex = 0; // Always start at 'Top' for a new main view
+                if (innerChartCycleTimer) {
+                    clearInterval(innerChartCycleTimer);
+                }
+                
+                // Start the inner cycle (Top/Least) for the current view
+                cycleInnerCharts(viewId, true); // Show the first one immediately (isManual=true here just means "don't cycle yet")
+                innerChartCycleTimer = setInterval(() => {
+                    cycleInnerCharts(viewId);
+                }, CYCLE_INTERVAL_MS);
+            }
+        }
+        
+        // --- Auto-Cycle Logic (Main Cycle) ---
+        function autoCycleViews() {
+            // If the inner cycle is at the end (Least), advance the main view
+            if (currentInnerViewIndex === innerViewOrder.length - 1) {
+                currentViewIndex = (currentViewIndex + 1) % viewOrder.length;
+                showView(viewOrder[currentViewIndex]); // This call resets the inner cycle
+            }
+        }
+
+
+        // --- Helper: CSV Parsing ---
+        function parseCSV(csvText) {
+            const lines = csvText.trim().split('\n');
+            if (lines.length < 2) return [];
+            
+            const rawHeaders = lines[0].split(',').map(h => h.trim());
+            const headers = rawHeaders.map(h => h.replace(/[^a-zA-Z0-9]/g, '_'));
+            const data = [];
+
+            ACM_DATA_KEY = headers.find(h => h.toUpperCase().includes('ACM')) || 'ACMs';
+
+            for (let i = 1; i < lines.length; i++) {
+                const values = lines[i].split(',');
+                if (values.length === headers.length) {
+                    let row = {};
+                    for (let j = 0; j < headers.length; j++) {
+                        let header = headers[j];
+                        let value = values[j].trim();
+                        row[header] = (header === KPI_KEY) ? parseFloat(value) || 0 : value;
+                    }
+                    data.push(row);
+                }
+            }
+            return data;
+        }
+
+        // --- Helper: Table Rendering (Styled) ---
+        function displayTable(data, tableId, headers = null) {
+            const container = document.getElementById(tableId);
+            container.innerHTML = '';
+            if (data.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 italic p-2">No data to display.</p>';
+                return;
+            }
+
+            const table = document.createElement('table');
+            table.className = 'w-full text-sm table-auto border-separate border-spacing-0 rounded-lg overflow-hidden';
+            
+            const dataHeaders = headers || Object.keys(data[0]); 
+
+            const thead = table.createTHead();
+            thead.className = 'bg-indigo-200/50';
+            
+            let headerRow = thead.insertRow(); 
+            
+            dataHeaders.forEach(header => {
+                let th = document.createElement("th");
+                th.className = 'py-2 px-3 text-left font-bold text-indigo-800';
+                
+                if (header === KPI_KEY) {
+                    th.textContent = 'Calls';
+                } else if (header === ACM_DATA_KEY) {
+                    th.textContent = 'ACM Name'; 
+                } else if (header === 'Total_Calls') {
+                    th.textContent = 'Total Calls';
+                } else {
+                    th.textContent = header.replace(/_/g, ' '); 
+                }
+                headerRow.appendChild(th);
+            });
+
+            const tbody = table.createTBody();
+            data.forEach((rowData, index) => {
+                let row = tbody.insertRow();
+                row.className = (index % 2 === 0) ? 'bg-white hover:bg-gray-100 transition duration-100' : 'bg-gray-50 hover:bg-gray-100 transition duration-100';
+                dataHeaders.forEach(header => {
+                    let cell = row.insertCell();
+                    cell.className = 'py-2 px-3 text-gray-700';
+                    cell.textContent = (typeof rowData[header] === 'number') ? Math.round(rowData[header]).toLocaleString() : rowData[header];
+                });
+            });
+
+            container.appendChild(table);
+        }
+
+        // --- Helper: Dynamic Aggregation and Sorting ---
+        function aggregateAndFilter(data, groupKey) {
+            const totals = data.reduce((acc, row) => {
+                const key = row[groupKey] || 'N/A'; 
+                acc[key] = (acc[key] || 0) + row[KPI_KEY]; 
+                return acc;
+            }, {});
+
+            return Object.entries(totals)
+                .map(([name, total]) => ({ [groupKey]: name, Total_Calls: total }))
+                .sort((a, b) => b.Total_Calls - a.Total_Calls);
+        }
+
+        // --- Chart Rendering Function (Simplified for single data set) ---
+        function renderChart(chartId, data, categoryKey, valueKey = 'Total_Calls', colorType) {
+            const chartElement = document.getElementById(chartId);
+            
+            if (existingCharts[chartId]) {
+                existingCharts[chartId].destroy();
+            }
+            
+            const labels = data.map(d => d[categoryKey]);
+            const values = data.map(d => d[valueKey]);
+            
+            let backgroundColors;
+            let borderColors;
+
+            if (colorType === 'top') {
+                const topColors = ['#2dd4bf', '#4f46e5', '#3b82f6']; 
+                backgroundColors = topColors;
+            } else { // 'least'
+                const leastColors = ['#f87171', '#fb923c', '#fcd34d']; 
+                backgroundColors = leastColors.reverse(); 
+            }
+
+            borderColors = backgroundColors; 
+            backgroundColors = backgroundColors.map(c => `${c}d0`);
+
+            
+            const ctx = chartElement.getContext('2d');
+            existingCharts[chartId] = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Call Count',
+                        data: values,
+                        backgroundColor: backgroundColors,
+                        borderColor: borderColors, 
+                        borderWidth: 1.5,
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'x',
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(200, 200, 200, 0.2)' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Call Count', font: { weight: 'bold' } },
+                            beginAtZero: true,
+                            grid: { color: '#e0e7ff' } 
+                        }
+                    },
+                    plugins: {
+                        title: { display: false }, 
+                        legend: { display: false },
+                        tooltip: {
+                             callbacks: {
+                                label: (context) => `Calls: ${Math.round(context.parsed.y).toLocaleString()}`
+                            }
+                        },
+                        datalabels: {
+                            anchor: 'end',
+                            align: 'top',
+                            formatter: (value) => Math.round(value).toLocaleString(), 
+                            color: '#1f2937', 
+                            font: { weight: 'bold' }
+                        }
+                    }
+                }
+            });
+        }
+
+        // --- Main Analysis Function ---
+        function generateSummaries(data) {
+            const dataKeys = Object.keys(data[0]);
+            const teamKey = dataKeys.find(k => k.toUpperCase().includes('TEAM')) || 'Team';
+            const branchKey = dataKeys.find(k => k.toUpperCase().includes('BRANCH')) || 'Branch';
+
+            // 1. ACMS 
+            const sortedByCalls = [...data].sort((a, b) => b[KPI_KEY] - a[KPI_KEY]);
+            const topAcms = sortedByCalls.slice(0, 3);
+            const leastAcms = sortedByCalls.slice(-3).reverse();
+            const acmHeaders = [ACM_DATA_KEY, KPI_KEY, teamKey, branchKey];
+
+            displayTable(topAcms, 'topAcmsTable', acmHeaders);
+            displayTable(leastAcms, 'leastAcmsTable', acmHeaders);
+            
+            renderChart('acmTopChart', topAcms, ACM_DATA_KEY, KPI_KEY, 'top');
+            renderChart('acmLeastChart', leastAcms, ACM_DATA_KEY, KPI_KEY, 'least');
+
+
+            // 2. TEAMS 
+            const aggregatedTeams = aggregateAndFilter(data, teamKey);
+            const topTeams = aggregatedTeams.slice(0, 3);
+            const leastTeams = aggregatedTeams.slice(-3).reverse();
+
+            displayTable(topTeams, 'topTeamsTable', [teamKey, 'Total_Calls']);
+            displayTable(leastTeams, 'leastTeamsTable', [teamKey, 'Total_Calls']);
+            
+            renderChart('teamTopChart', topTeams, teamKey, 'Total_Calls', 'top');
+            renderChart('teamLeastChart', leastTeams, teamKey, 'Total_Calls', 'least');
+
+
+            // 3. BRANCHES 
+            const aggregatedBranches = aggregateAndFilter(data, branchKey);
+            const topBranches = aggregatedBranches.slice(0, 3);
+            const leastBranches = aggregatedBranches.slice(-3).reverse();
+
+            displayTable(topBranches, 'topBranchesTable', [branchKey, 'Total_Calls']);
+            displayTable(leastBranches, 'leastBranchesTable', [branchKey, 'Total_Calls']);
+            
+            renderChart('branchTopChart', topBranches, branchKey, 'Total_Calls', 'top');
+            renderChart('branchLeastChart', leastBranches, branchKey, 'Total_Calls', 'least');
+        }
+
+        // --- Event Handler: Triggered by file selection ---
+        function processFile() {
+            const fileInput = document.getElementById('csvFile');
+            const status = document.getElementById('status');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                status.textContent = "Please select a CSV file first.";
+                return;
+            }
+
+            status.textContent = "Processing file...";
+            document.getElementById('fullTablePlaceholder').classList.add('hidden');
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const csvText = e.target.result;
+                    const data = parseCSV(csvText);
+                    
+                    if (data.length === 0 || !data[0].hasOwnProperty(KPI_KEY)) {
+                        status.textContent = `❌ Error: File is empty or missing the required header: ${KPI_KEY}. Please check your CSV column names.`;
+                        document.getElementById('fullTablePlaceholder').classList.remove('hidden'); 
+                        return;
+                    }
+
+                    // 1. Display the entire data set immediately
+                    displayTable(data, 'fullTable'); 
+                    
+                    // 2. Generate and display dynamic summaries and charts
+                    generateSummaries(data);
+                    
+                    // 3. Start the entire cycling process
+                    stopCycling(false); // Clear any old timers
+                    
+                    currentViewIndex = 0;
+                    currentInnerViewIndex = 0;
+                    
+                    // Start the main cycle timer first, which controls the tab switch
+                    autoCycleTimer = setInterval(autoCycleViews, CYCLE_INTERVAL_MS * 2); // Main cycle happens after inner cycle (Top + Least)
+                    
+                    // Show the first view (which starts the inner cycle)
+                    showView(viewOrder[currentViewIndex]); 
+                    
+                    status.textContent = `✅ Success! Processed ${data.length} records. Auto-cycling views every ${CYCLE_INTERVAL_MS / 1000}s.`;
+                } catch (error) {
+                    status.textContent = `❌ An error occurred: ${error.message}`;
+                    console.error(error);
+                    document.getElementById('fullTablePlaceholder').classList.remove('hidden'); 
+                }
+            };
+            
+            reader.onerror = () => {
+                status.textContent = "Error reading file.";
+                document.getElementById('fullTablePlaceholder').classList.remove('hidden'); 
+            };
+
+            reader.readAsText(file);
+        }
+        
+        // Initial state setup and cleanup
+        document.addEventListener('DOMContentLoaded', () => {
+             // Clear chart canvases to prevent initial broken look
+            ['acmTopChart', 'acmLeastChart', 'teamTopChart', 'teamLeastChart', 'branchTopChart', 'branchLeastChart'].forEach(id => {
+                 const canvas = document.getElementById(id);
+                 if (canvas) {
+                     canvas.getContext('2d').clearRect(0, 0, 400, 400);
+                 }
+            });
+        });
+    </script>
+</body>
+</html>
